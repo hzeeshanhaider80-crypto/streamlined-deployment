@@ -1,5 +1,5 @@
 # ---------- Stage 1: install production dependencies ----------
-FROM node:20-alpine AS deps
+FROM node:26-alpine AS deps
 WORKDIR /app
 # Copy only package files first → this slow layer is cached until dependencies change
 COPY package*.json ./
@@ -7,7 +7,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 # ---------- Stage 2: small final image ----------
-FROM node:20-alpine AS runtime
+FROM node:26-alpine AS runtime
 # Commit ID passed in by the pipeline
 ARG APP_VERSION=local
 ENV NODE_ENV=production \
