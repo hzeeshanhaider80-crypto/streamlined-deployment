@@ -18,6 +18,8 @@ WORKDIR /app
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 # Copy the application code
 COPY --chown=node:node . .
+# Remove npm: not needed at runtime, and it bundles a vulnerable tar (CVE-2026-59873)
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 # Security: never run as root
 USER node
 # Documentation: the app listens on 3000
