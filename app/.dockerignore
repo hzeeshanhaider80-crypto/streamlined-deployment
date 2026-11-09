@@ -1,0 +1,9 @@
+# Never copy these into the image
+node_modules
+test
+.git
+.env
+.env.*
+Dockerfile
+.dockerignore
+*.md

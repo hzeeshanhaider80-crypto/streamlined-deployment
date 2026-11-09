@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Production Web App on AWS</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 60px auto; padding: 0 16px; color: #1f2937; }
+    h1 { color: #0f766e; }
+    .box, pre { background: #f3f4f6; padding: 16px; border-radius: 8px; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <h1>🚀 Production Web App on AWS</h1>
+  <p>Browser → Nginx (HTTPS) → Node.js (Docker) → Amazon RDS (PostgreSQL)</p>
+  <div class="box">
+    <p><b>Total visits (stored in RDS):</b> <span id="visits">…</span></p>
+    <p><b>Database:</b> <span id="db">…</span></p>
+  </div>
+  <h3>Deployment info</h3>
+  <pre id="info">Loading...</pre>
+  <script>
+    // Record this visit in the database and show the total
+    fetch('/api/visits', { method: 'POST' }).then(r => r.json())
+      .then(d => document.getElementById('visits').textContent = d.total)
+      .catch(() => document.getElementById('visits').textContent = 'error');
+    // Is the database reachable?
+    fetch('/ready').then(r => r.json())
+      .then(d => document.getElementById('db').textContent = d.database);
+    // Which version is running?
+    fetch('/api/info').then(r => r.json())
+      .then(d => document.getElementById('info').textContent = JSON.stringify(d, null, 2));
+  </script>
+</body>
+</html>

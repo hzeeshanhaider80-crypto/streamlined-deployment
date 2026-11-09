@@ -1,0 +1,71 @@
+# The containers on the server and how they connect. (The database is RDS, outside Docker.)
+services:
+
+  app:
+    image: ${APP_IMAGE:-webapp:local}   # deploy.sh sets the exact ECR image version
+    build:
+      context: ./app                    # only used for local builds
+    container_name: webapp
+    restart: unless-stopped             # restart after crashes and reboots
+    env_file:
+      - .env                            # DB_HOST, DB_PASSWORD, ... from the server
+    volumes:
+      - ./certs:/app/certs:ro           # RDS certificate bundle (verifies the database's SSL)
+    expose:
+      - "3000"                          # reachable only by Nginx, not the internet
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"                  # max 75% of one CPU
+          memory: 512M                  # max 512 MB RAM
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"                 # log rotation: 3 × 10 MB
+        max-file: "3"
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"                         # public HTTP
+      - "443:443"                       # public HTTPS
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certbot/www:/var/www/certbot:ro       # Let's Encrypt challenge files
+      - ./certbot/conf:/etc/letsencrypt:ro      # certificates
+    depends_on:
+      app:
+        condition: service_healthy      # start after the app is healthy
+    networks:
+      - backend
+    # Reload every 6 h (picks up renewed certificates); '$$' escapes '$' for Compose
+    command: >
+      /bin/sh -c "while :; do sleep 6h & wait $${!}; nginx -s reload; done &
+      nginx -g 'daemon off;'"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  certbot:
+    image: certbot/certbot:latest
+    container_name: certbot
+    restart: unless-stopped
+    volumes:
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+    # Try renewal every 12 h (renews only when < 30 days remain)
+    entrypoint: >
+      /bin/sh -c "trap exit TERM; while :; do
+      certbot renew --webroot -w /var/www/certbot --quiet;
+      sleep 12h & wait $${!}; done"
+
+networks:
+  backend:
+    driver: bridge                      # private network for app + nginx

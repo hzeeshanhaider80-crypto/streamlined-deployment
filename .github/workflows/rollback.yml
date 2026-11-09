@@ -1,0 +1,32 @@
+# Rollback button: Actions → Rollback → Run workflow → enter an older image tag
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (7-character commit ID)"
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://${{ vars.DOMAIN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+      - name: Deploy the selected version
+        run: bash scripts/ssm-deploy.sh "$IMAGE_TAG"     # input via env var = injection-safe
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}

@@ -1,0 +1,134 @@
+# Pull request → lint + test + build + security scan (nothing published)
+# Push to main → same checks → push to ECR → ⏸ approval → deploy via SSM → smoke test
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:                    # manual "Run workflow" button
+
+permissions:
+  id-token: write                       # OIDC login to AWS
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: streamlined-webapp
+
+concurrency:                            # cancel old PR runs, never a running deploy
+  group: cicd-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint the Dockerfile (hadolint)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: app/Dockerfile
+          failure-threshold: error
+      - name: Lint shell scripts (shellcheck)
+        run: shellcheck --severity=error scripts/*.sh
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install dependencies (exact versions)
+        run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: Dependency vulnerability check
+        run: npm audit --omit=dev --audit-level=critical
+
+  build:
+    name: build
+    needs: [lint, test]                 # only if lint and tests passed
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.vars.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image tag = short commit ID
+        id: vars
+        run: echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (local, not published yet)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          load: true
+          tags: webapp:${{ steps.vars.outputs.tag }}
+          build-args: |
+            APP_VERSION=${{ steps.vars.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Security scan (Trivy), fail on fixable CRITICAL issues
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: webapp:${{ steps.vars.outputs.tag }}
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Log in to AWS (OIDC)
+        if: github.event_name != 'pull_request'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Log in to ECR
+        if: github.event_name != 'pull_request'
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Push image to ECR (commit ID + latest)
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          push: true
+          build-args: |
+            APP_VERSION=${{ steps.vars.outputs.tag }}
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.vars.outputs.tag }}
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+          cache-from: type=gha
+
+  deploy:
+    name: deploy
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:                        # requires your approval before it starts
+      name: production
+      url: https://${{ vars.DOMAIN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Deploy via AWS Systems Manager
+        run: bash scripts/ssm-deploy.sh "${{ needs.build.outputs.image_tag }}"
+        env:
+          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+      - name: Smoke test from the internet
+        run: |
+          curl -fsSL --retry 5 --retry-delay 5 "http://${{ vars.DOMAIN }}/ready"
+          echo
+          curl -fsSL "http://${{ vars.DOMAIN }}/api/info"

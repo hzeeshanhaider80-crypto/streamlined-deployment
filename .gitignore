@@ -1,0 +1,7 @@
+# Server-only files: never commit them
+.env
+.deployed_tag
+certbot/
+certs/
+node_modules/
+*.log

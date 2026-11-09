@@ -1,0 +1,17 @@
+{
+  "name": "streamlined-webapp",
+  "version": "1.0.0",
+  "description": "Node.js web app on AWS: Docker, Nginx, HTTPS, RDS, ECR, CI/CD",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "pg": "^8.13.1"
+  }
+}
